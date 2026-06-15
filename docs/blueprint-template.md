@@ -18,19 +18,28 @@
 - [VALIDATE_LOGS_FINAL_SCORE]: 100/100
 - [TOTAL_TRACES_COUNT]: 50+ (verified via Langfuse API; >10 required)
 - [PII_LEAKS_FOUND]: 0
-
 ---
 
 ## 3. Technical Evidence (Group)
 
 ### 3.1 Logging & Tracing
-- [EVIDENCE_CORRELATION_ID_SCREENSHOT]: docs/evidence/correlation_id.png  <!-- TODO: chụp header x-request-id hoặc 2 dòng log cùng req-id -->
-- [EVIDENCE_PII_REDACTION_SCREENSHOT]: docs/evidence/pii_redaction.png  <!-- TODO: chụp dòng log có [REDACTED_EMAIL]/[REDACTED_CREDIT_CARD] -->
-- [EVIDENCE_TRACE_WATERFALL_SCREENSHOT]: docs/evidence/trace_waterfall.png
+- [EVIDENCE_CORRELATION_ID_SCREENSHOT]: 
+![alt text](evidence/correlation_id.png)
+*path*: docs/evidence/correlation_id.png  <!-- TODO: chụp header x-request-id hoặc 2 dòng log cùng req-id -->
+- [EVIDENCE_PII_REDACTION_SCREENSHOT]:
+![alt text](evidence/pii_redaction.png)
+ *path* :docs/evidence/pii_redaction.png  <!-- TODO: chụp dòng log có [REDACTED_EMAIL]/[REDACTED_CREDIT_CARD] -->
+- [EVIDENCE_TRACE_WATERFALL_SCREENSHOT]: 
+![alt text](evidence/trace_waterfall.png)
+*path*: docs/evidence/trace_waterfall.png
 - [TRACE_WATERFALL_EXPLANATION]: In the `rag_slow` trace, the parent span `run` took 2.652s. Its child span `retrieve` (RAG vector lookup) accounts for 2.501s, while the child span `llm.generate` took only 0.151s. This proves the latency bottleneck is the retrieval step, not the LLM — the textbook Metrics→Traces→Logs drill-down that localizes the root cause.
 
 ### 3.2 Dashboard & SLOs
-- [DASHBOARD_6_PANELS_SCREENSHOT]: [Path to image]
+- [DASHBOARD_6_PANELS_SCREENSHOT]:
+![alt text](evidence/dashboard.png)
+
+*path*: docs\evidence\dashboard.png
+
 - [SLO_TABLE]:
 | SLI | Target | Window | Current Value |
 |---|---:|---|---:|
@@ -39,7 +48,9 @@
 | Cost Budget | < $2.5/day | 1d | ~$0.002 avg/req |
 
 ### 3.3 Alerts & Runbook
-- [ALERT_RULES_SCREENSHOT]: docs/evidence/alert_rules.png  <!-- TODO: chụp config/alert_rules.yaml -->
+- [ALERT_RULES_SCREENSHOT]:
+![alt text](evidence/alert_rules.png)
+ *path* docs/evidence/alert_rules.png  <!-- TODO: chụp config/alert_rules.yaml -->
 - [SAMPLE_RUNBOOK_LINK]: docs/alerts.md#1-high-latency-p95 (3 rules defined in config/alert_rules.yaml: high_latency_p95, high_error_rate, cost_budget_spike)
 
 ---
@@ -80,6 +91,6 @@
 ---
 
 ## 6. Bonus Items (Optional)
-- [BONUS_COST_OPTIMIZATION]: Cost is tracked live (`avg_cost_usd`, `total_cost_usd`) and the `cost_spike` incident (output tokens x4) is observable on the dashboard cost panel — baseline ~$0.0018/req vs ~4x during spike.
-- [BONUS_AUDIT_LOGS]: AUDIT_LOG_PATH is wired in `.env` for a separate audit stream (optional extension).
-- [BONUS_CUSTOM_METRIC]: Automation — same-origin self-refreshing 6-panel dashboard served by the app at `GET /dashboard` (`docs/dashboard.html`), with SLO threshold lines that turn red on breach; plus per-step trace spans (`retrieve`, `llm.generate`) for waterfall drill-down. Evidence: commits `62c4f2c` (dashboard) and `6cd91d7` (spans).
+- [BONUS_COST_OPTIMIZATION]: Implemented model routing — short/simple queries (<60 chars) are routed to the cheaper Haiku tier instead of Sonnet (`app/agent.py`, model-aware `PRICING`). Measured on the sample queries with a fixed RNG seed (`scripts/cost_benchmark.py`): **total cost $0.01917 → $0.008959 (53.3% lower)** with **quality unchanged at 0.88**. Before/after is reproducible via `uv run python scripts/cost_benchmark.py`.
+- [BONUS_AUDIT_LOGS]: Separate, append-only, PII-free audit trail at `data/audit.jsonl` (`app/audit.py`), distinct from operational logs. Records `chat_completed` / `chat_failed` (with hashed user id, correlation id, model, cost) and `incident_enabled` / `incident_disabled` actions for security/compliance review.
+- [BONUS_CUSTOM_METRIC]: Automation — same-origin self-refreshing 6-panel dashboard served by the app at `GET /dashboard` (`docs/dashboard.html`), with SLO threshold lines that turn red on breach; plus per-step trace spans (`retrieve`, `llm.generate`) for waterfall drill-down.
