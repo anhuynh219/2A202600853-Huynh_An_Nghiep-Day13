@@ -30,8 +30,8 @@
 ![alt text](evidence/pii_redaction.png)
  *path* :docs/evidence/pii_redaction.png  <!-- TODO: chụp dòng log có [REDACTED_EMAIL]/[REDACTED_CREDIT_CARD] -->
 - [EVIDENCE_TRACE_WATERFALL_SCREENSHOT]: 
-![alt text](evidence/trace_waterfall.png)
-*path*: docs/evidence/trace_waterfall.png
+![alt text](evidence/water_tracemark.png)
+*path*: docs/evidence/water_tracemark.png
 - [TRACE_WATERFALL_EXPLANATION]: In the `rag_slow` trace, the parent span `run` took 2.652s. Its child span `retrieve` (RAG vector lookup) accounts for 2.501s, while the child span `llm.generate` took only 0.151s. This proves the latency bottleneck is the retrieval step, not the LLM — the textbook Metrics→Traces→Logs drill-down that localizes the root cause.
 
 ### 3.2 Dashboard & SLOs
@@ -86,7 +86,7 @@
 
 ### Huynh An Nghiep — Demo & Report (Member E)
 - [TASKS_COMPLETED]: Injected the `rag_slow` incident, performed the Metrics→Traces→Logs root-cause analysis, and authored this report.
-- [EVIDENCE_LINK]: Section 4 above; docs/evidence/trace_waterfall.png
+- [EVIDENCE_LINK]: Section 4 above; docs/evidence/water_tracemark.png
 
 ---
 
