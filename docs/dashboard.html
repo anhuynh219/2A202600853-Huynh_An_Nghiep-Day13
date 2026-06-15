@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Day 13 — Observability Dashboard</title>
+<style>
+  :root { --bg:#0e1117; --panel:#161b22; --line:#30363d; --txt:#e6edf3; --muted:#8b949e;
+          --good:#3fb950; --warn:#d29922; --bad:#f85149; --accent:#58a6ff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt);
+         font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+  header { padding:16px 24px; border-bottom:1px solid var(--line); display:flex;
+           justify-content:space-between; align-items:center; }
+  header h1 { font-size:16px; margin:0; font-weight:600; }
+  header .meta { font-size:12px; color:var(--muted); }
+  .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; padding:24px; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; min-height:150px; }
+  .panel h2 { font-size:12px; color:var(--muted); margin:0 0 10px; font-weight:600; text-transform:uppercase; letter-spacing:.5px; }
+  .big { font-size:34px; font-weight:700; }
+  .unit { font-size:13px; color:var(--muted); margin-left:4px; }
+  .row { display:flex; gap:18px; flex-wrap:wrap; margin-top:6px; }
+  .row div span { color:var(--muted); font-size:11px; display:block; }
+  .row div b { font-size:18px; font-weight:600; }
+  .slo { font-size:11px; margin-top:10px; }
+  .ok { color:var(--good); } .warnc { color:var(--warn); } .badc { color:var(--bad); }
+  canvas { width:100%; height:48px; margin-top:8px; display:block; }
+  .pill { font-size:10px; padding:2px 8px; border-radius:999px; border:1px solid var(--line); }
+</style>
+</head>
+<body>
+<header>
+  <h1>🛰️ Day 13 — Agent Observability</h1>
+  <div class="meta">
+    auto-refresh <b>15s</b> · <span id="status" class="pill">connecting…</span> · <span id="clock"></span>
+  </div>
+</header>
+
+<div class="grid">
+  <!-- 1. Latency -->
+  <div class="panel">
+    <h2>1 · Latency (ms)</h2>
+    <div class="row">
+      <div><span>P50</span><b id="p50">–</b></div>
+      <div><span>P95</span><b id="p95">–</b></div>
+      <div><span>P99</span><b id="p99">–</b></div>
+    </div>
+    <canvas id="c_p95" width="300" height="48"></canvas>
+    <div class="slo" id="slo_lat">SLO: P95 &lt; 3000ms</div>
+  </div>
+
+  <!-- 2. Traffic -->
+  <div class="panel">
+    <h2>2 · Traffic (total requests)</h2>
+    <div class="big" id="traffic">–</div>
+    <canvas id="c_traffic" width="300" height="48"></canvas>
+  </div>
+
+  <!-- 3. Error rate -->
+  <div class="panel">
+    <h2>3 · Error Rate</h2>
+    <div class="big" id="errrate">–<span class="unit">%</span></div>
+    <div id="errbreak" class="slo">no errors</div>
+    <div class="slo" id="slo_err">SLO: &lt; 2%</div>
+  </div>
+
+  <!-- 4. Cost -->
+  <div class="panel">
+    <h2>4 · Cost (USD)</h2>
+    <div class="row">
+      <div><span>avg / req</span><b id="avgcost">–</b></div>
+      <div><span>total</span><b id="totcost">–</b></div>
+    </div>
+    <canvas id="c_cost" width="300" height="48"></canvas>
+    <div class="slo" id="slo_cost">SLO: &lt; $2.5 / day</div>
+  </div>
+
+  <!-- 5. Tokens -->
+  <div class="panel">
+    <h2>5 · Tokens</h2>
+    <div class="row">
+      <div><span>in (total)</span><b id="tin">–</b></div>
+      <div><span>out (total)</span><b id="tout">–</b></div>
+    </div>
+    <canvas id="c_tok" width="300" height="48"></canvas>
+  </div>
+
+  <!-- 6. Quality -->
+  <div class="panel">
+    <h2>6 · Quality Proxy (heuristic)</h2>
+    <div class="big" id="quality">–</div>
+    <canvas id="c_q" width="300" height="48"></canvas>
+    <div class="slo" id="slo_q">SLO: &ge; 0.75</div>
+  </div>
+</div>
+
+<script>
+const SLO = { p95: 3000, errRate: 2.0, quality: 0.75 };
+const hist = { p95:[], traffic:[], cost:[], tok:[], q:[] };
+const cap = 40; // keep last N polls
+
+function push(arr, v){ arr.push(v); if(arr.length>cap) arr.shift(); }
+
+function spark(id, data, color){
+  const cv = document.getElementById(id); if(!cv) return;
+  const ctx = cv.getContext('2d'); const W=cv.width, H=cv.height;
+  ctx.clearRect(0,0,W,H);
+  if(data.length<2) return;
+  const max = Math.max(...data, 1), min = Math.min(...data, 0);
+  const rng = (max-min)||1;
+  ctx.beginPath(); ctx.lineWidth=2; ctx.strokeStyle=color;
+  data.forEach((v,i)=>{
+    const x = (i/(data.length-1))*W;
+    const y = H - ((v-min)/rng)*(H-6) - 3;
+    i? ctx.lineTo(x,y) : ctx.moveTo(x,y);
+  });
+  ctx.stroke();
+}
+
+function cls(ok){ return ok ? 'ok' : 'badc'; }
+
+async function tick(){
+  const st = document.getElementById('status');
+  try {
+    const r = await fetch('/metrics', {cache:'no-store'});
+    const m = await r.json();
+    st.textContent = 'live'; st.style.color = 'var(--good)';
+
+    // 1 latency
+    document.getElementById('p50').textContent = m.latency_p50;
+    const p95 = m.latency_p95;
+    const p95el = document.getElementById('p95');
+    p95el.textContent = p95; p95el.className = cls(p95 < SLO.p95);
+    document.getElementById('p99').textContent = m.latency_p99;
+    push(hist.p95, p95); spark('c_p95', hist.p95, p95<SLO.p95?'#58a6ff':'#f85149');
+    document.getElementById('slo_lat').innerHTML =
+      `SLO: P95 &lt; 3000ms — <span class="${cls(p95<SLO.p95)}">${p95<SLO.p95?'OK':'BREACH'}</span>`;
+
+    // 2 traffic
+    document.getElementById('traffic').textContent = m.traffic;
+    push(hist.traffic, m.traffic); spark('c_traffic', hist.traffic, '#58a6ff');
+
+    // 3 error rate
+    const errs = Object.values(m.error_breakdown||{}).reduce((a,b)=>a+b,0);
+    const rate = m.traffic ? (errs/m.traffic*100) : 0;
+    const erel = document.getElementById('errrate');
+    erel.innerHTML = rate.toFixed(2)+'<span class="unit">%</span>';
+    erel.className = 'big '+cls(rate < SLO.errRate);
+    const br = Object.entries(m.error_breakdown||{});
+    document.getElementById('errbreak').textContent =
+      br.length ? br.map(([k,v])=>`${k}: ${v}`).join(' · ') : 'no errors';
+    document.getElementById('slo_err').innerHTML =
+      `SLO: &lt; 2% — <span class="${cls(rate<SLO.errRate)}">${rate<SLO.errRate?'OK':'BREACH'}</span>`;
+
+    // 4 cost
+    document.getElementById('avgcost').textContent = '$'+m.avg_cost_usd;
+    document.getElementById('totcost').textContent = '$'+m.total_cost_usd;
+    push(hist.cost, m.total_cost_usd); spark('c_cost', hist.cost, '#d29922');
+
+    // 5 tokens
+    document.getElementById('tin').textContent = m.tokens_in_total;
+    document.getElementById('tout').textContent = m.tokens_out_total;
+    push(hist.tok, m.tokens_out_total); spark('c_tok', hist.tok, '#3fb950');
+
+    // 6 quality
+    const q = m.quality_avg;
+    const qel = document.getElementById('quality');
+    qel.textContent = q; qel.className = 'big '+cls(q >= SLO.quality);
+    push(hist.q, q); spark('c_q', hist.q, q>=SLO.quality?'#3fb950':'#f85149');
+    document.getElementById('slo_q').innerHTML =
+      `SLO: &ge; 0.75 — <span class="${cls(q>=SLO.quality)}">${q>=SLO.quality?'OK':'BREACH'}</span>`;
+
+  } catch(e){
+    st.textContent = 'offline'; st.style.color = 'var(--bad)';
+  }
+  document.getElementById('clock').textContent = new Date().toLocaleTimeString();
+}
+
+tick();
+setInterval(tick, 15000);
+</script>
+</body>
+</html>
