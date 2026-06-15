@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from structlog.contextvars import bind_contextvars
 
 from .agent import LabAgent
+from .audit import audit
 from .incidents import disable, enable, status
 from .logging_config import configure_logging, get_logger
 from .metrics import record_error, snapshot
@@ -85,7 +86,18 @@ async def chat(request: Request, body: ChatRequest) -> ChatResponse:
             tokens_in=result.tokens_in,
             tokens_out=result.tokens_out,
             cost_usd=result.cost_usd,
-            payload={"answer_preview": summarize_text(result.answer)},
+            payload={"answer_preview": summarize_text(result.answer), "model_used": result.model},
+        )
+        # Separate, PII-free audit trail of completed requests (who/what/cost).
+        audit(
+            "chat_completed",
+            correlation_id=request.state.correlation_id,
+            user_id_hash=hash_user_id(body.user_id),
+            session_id=body.session_id,
+            feature=body.feature,
+            model=result.model,
+            latency_ms=result.latency_ms,
+            cost_usd=result.cost_usd,
         )
         return ChatResponse(
             answer=result.answer,
@@ -105,6 +117,13 @@ async def chat(request: Request, body: ChatRequest) -> ChatResponse:
             error_type=error_type,
             payload={"detail": str(exc), "message_preview": summarize_text(body.message)},
         )
+        audit(
+            "chat_failed",
+            correlation_id=request.state.correlation_id,
+            user_id_hash=hash_user_id(body.user_id),
+            feature=body.feature,
+            error_type=error_type,
+        )
         raise HTTPException(status_code=500, detail=error_type) from exc
 
 
@@ -113,6 +132,7 @@ async def enable_incident(name: str) -> JSONResponse:
     try:
         enable(name)
         log.warning("incident_enabled", service="control", payload={"name": name})
+        audit("incident_enabled", name=name)
         return JSONResponse({"ok": True, "incidents": status()})
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -123,6 +143,7 @@ async def disable_incident(name: str) -> JSONResponse:
     try:
         disable(name)
         log.warning("incident_disabled", service="control", payload={"name": name})
+        audit("incident_disabled", name=name)
         return JSONResponse({"ok": True, "incidents": status()})
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
